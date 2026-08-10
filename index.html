@@ -912,6 +912,94 @@
       }
     };
 
+    // Global Mobile Speech Unlocker & TTS Player
+    function playKoreanAudio(text) {
+      if (!('speechSynthesis' in window)) {
+        if (typeof AUDIO !== 'undefined' && AUDIO.speakKoreanFallback) {
+          AUDIO.speakKoreanFallback(text);
+        }
+        return;
+      }
+
+      // 1. Cancel any stuck/queued audio stream on mobile
+      try {
+        window.speechSynthesis.cancel();
+      } catch (e) {}
+
+      // 2. Mobile Speech Engine Unlocker Trick: Speak an instant dummy silent utterance first
+      try {
+        const dummy = new SpeechSynthesisUtterance('');
+        dummy.volume = 0.001;
+        window.speechSynthesis.speak(dummy);
+      } catch (e) {}
+
+      // 3. Immediately follow up with the actual Korean text utterance
+      if (text && String(text).trim() !== '') {
+        setTimeout(() => {
+          const cleanText = String(text).replace(/\s*\(받침\)/, '').trim();
+          if (!cleanText) return;
+
+          if (typeof AUDIO !== 'undefined' && typeof AUDIO.unlock === 'function') {
+            AUDIO.unlock();
+          }
+
+          const voices = ('speechSynthesis' in window) ? (window.speechSynthesis.getVoices() || []) : [];
+          const hasKoreanVoice = voices.some(v => v.lang.includes('ko') || v.lang.includes('KR') || v.lang.includes('KO'));
+
+          if ('speechSynthesis' in window && (hasKoreanVoice || (typeof AUDIO !== 'undefined' && AUDIO.selectedVoiceURI))) {
+            try {
+              const utterance = new SpeechSynthesisUtterance(cleanText);
+              utterance.lang = 'ko-KR';
+              utterance.rate = (typeof AUDIO !== 'undefined' && AUDIO.rate) ? AUDIO.rate : 0.8;
+              utterance.pitch = 1.0;
+              utterance.volume = 1.0;
+
+              if (typeof AUDIO !== 'undefined' && AUDIO.selectedVoiceURI) {
+                const chosen = voices.find(v => (v.voiceURI || v.name) === AUDIO.selectedVoiceURI);
+                if (chosen) utterance.voice = chosen;
+              } else {
+                const koVoice = voices.find(v => v.lang.includes('ko') || v.lang.includes('KR') || v.lang.includes('KO'));
+                if (koVoice) utterance.voice = koVoice;
+              }
+
+              window.speechSynthesis.speak(utterance);
+              return;
+            } catch (e) {
+              console.warn('Native speech error in playKoreanAudio:', e);
+            }
+          }
+
+          // Fallback Online Audio Stream if no local ko-KR voice
+          try {
+            const encodedText = encodeURIComponent(cleanText);
+            const fallbackAudioUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=ko&client=tw-ob`;
+            const audio = new Audio(fallbackAudioUrl);
+            audio.play().catch(e => console.log('Fallback audio play blocked', e));
+          } catch (e) {
+            console.error('Fallback audio error:', e);
+          }
+        }, 50);
+      }
+    }
+
+    // Navigation & Action Unlocker
+    function unlockAudioAndAction(actionCallback) {
+      if ('speechSynthesis' in window) {
+        try {
+          window.speechSynthesis.cancel();
+          const dummy = new SpeechSynthesisUtterance('');
+          dummy.volume = 0.001;
+          window.speechSynthesis.speak(dummy);
+        } catch (e) {}
+      }
+      if (typeof AUDIO !== 'undefined' && typeof AUDIO.unlock === 'function') {
+        AUDIO.unlock();
+      }
+      if (typeof actionCallback === 'function') {
+        actionCallback();
+      }
+    }
+
     // 2. AUDIO SYNTHESIZER & SPEECH ENGINE
     const AUDIO = {
       sfxEnabled: true,
@@ -974,47 +1062,9 @@
         if (banner) banner.classList.add('hidden');
       },
 
-      speakKorean(text) {
-        if (!this.unlocked) {
-          this.unlock();
-        }
+      speakKoreanFallback(text) {
         const cleanText = (text || '').replace(/\s*\(받침\)/, '').trim();
         if (!cleanText) return;
-
-        // Strategy A: Native SpeechSynthesis if ko-KR voice is installed
-        if ('speechSynthesis' in window) {
-          try {
-            window.speechSynthesis.cancel();
-            if (!this.voices || this.voices.length === 0) {
-              this.loadVoices();
-            }
-            const voices = this.voices.length > 0 ? this.voices : (window.speechSynthesis.getVoices() || []);
-            const hasKoreanVoice = voices.some(v => v.lang.includes('ko') || v.lang.includes('KR') || v.lang.includes('KO'));
-
-            if (hasKoreanVoice || this.selectedVoiceURI) {
-              const utterance = new SpeechSynthesisUtterance(cleanText);
-              utterance.lang = 'ko-KR';
-              utterance.rate = this.rate || 0.85;
-              utterance.pitch = 1.0;
-              utterance.volume = 1.0;
-
-              if (this.selectedVoiceURI) {
-                const chosen = voices.find(v => (v.voiceURI || v.name) === this.selectedVoiceURI);
-                if (chosen) utterance.voice = chosen;
-              } else {
-                const koVoice = voices.find(v => v.lang.includes('ko') || v.lang.includes('KR') || v.lang.includes('KO'));
-                if (koVoice) utterance.voice = koVoice;
-              }
-
-              window.speechSynthesis.speak(utterance);
-              return;
-            }
-          } catch (e) {
-            console.warn('Native Korean TTS failed, switching to online fallback:', e);
-          }
-        }
-
-        // Strategy B: Fallback Online Audio Stream (Guaranteed Mobile Audio)
         try {
           const encodedText = encodeURIComponent(cleanText);
           const fallbackAudioUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=ko&client=tw-ob`;
@@ -1023,6 +1073,10 @@
         } catch (e) {
           console.error('Audio fallback error:', e);
         }
+      },
+
+      speakKorean(text) {
+        playKoreanAudio(text);
       },
 
       speak(text, lang = 'ko-KR') {
@@ -1115,6 +1169,8 @@
     const AudioEngine = AUDIO;
     window.AUDIO = AUDIO;
     window.AudioEngine = AUDIO;
+    window.playKoreanAudio = playKoreanAudio;
+    window.unlockAudioAndAction = unlockAudioAndAction;
 
     // 3. PERSISTENCE ENGINE (LocalStorage)
     const STORE = {
