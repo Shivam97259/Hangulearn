@@ -1,0 +1,6 @@
+{
+  "name": "한글 Flow - Hangul Learning Game Platform",
+  "description": "A clean, modern, minimalist Hangul learning game platform featuring SRS mastery tracking, audio pronunciation, interactive character matrix, 4-stage learning paths, and 8 mini-games.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
