@@ -945,8 +945,19 @@
       unlock() {
         if (this.unlocked) return;
         this.init();
-        if (this.audioCtx && this.audioCtx.state === 'suspended') {
-          this.audioCtx.resume();
+        if (this.audioCtx) {
+          if (this.audioCtx.state === 'suspended') {
+            this.audioCtx.resume();
+          }
+          try {
+            const buffer = this.audioCtx.createBuffer(1, 1, 22050);
+            const source = this.audioCtx.createBufferSource();
+            source.buffer = buffer;
+            source.connect(this.audioCtx.destination);
+            source.start(0);
+          } catch (e) {
+            console.warn('Web Audio buffer warmup error:', e);
+          }
         }
         if ('speechSynthesis' in window) {
           try {
@@ -967,36 +978,50 @@
         if (!this.unlocked) {
           this.unlock();
         }
-        if (!('speechSynthesis' in window)) {
-          if (typeof UI !== 'undefined' && UI.toast) UI.toast('Speech Synthesis not supported in browser', 'error');
-          return;
+        const cleanText = (text || '').replace(/\s*\(받침\)/, '').trim();
+        if (!cleanText) return;
+
+        // Strategy A: Native SpeechSynthesis if ko-KR voice is installed
+        if ('speechSynthesis' in window) {
+          try {
+            window.speechSynthesis.cancel();
+            if (!this.voices || this.voices.length === 0) {
+              this.loadVoices();
+            }
+            const voices = this.voices.length > 0 ? this.voices : (window.speechSynthesis.getVoices() || []);
+            const hasKoreanVoice = voices.some(v => v.lang.includes('ko') || v.lang.includes('KR') || v.lang.includes('KO'));
+
+            if (hasKoreanVoice || this.selectedVoiceURI) {
+              const utterance = new SpeechSynthesisUtterance(cleanText);
+              utterance.lang = 'ko-KR';
+              utterance.rate = this.rate || 0.85;
+              utterance.pitch = 1.0;
+              utterance.volume = 1.0;
+
+              if (this.selectedVoiceURI) {
+                const chosen = voices.find(v => (v.voiceURI || v.name) === this.selectedVoiceURI);
+                if (chosen) utterance.voice = chosen;
+              } else {
+                const koVoice = voices.find(v => v.lang.includes('ko') || v.lang.includes('KR') || v.lang.includes('KO'));
+                if (koVoice) utterance.voice = koVoice;
+              }
+
+              window.speechSynthesis.speak(utterance);
+              return;
+            }
+          } catch (e) {
+            console.warn('Native Korean TTS failed, switching to online fallback:', e);
+          }
         }
+
+        // Strategy B: Fallback Online Audio Stream (Guaranteed Mobile Audio)
         try {
-          window.speechSynthesis.cancel(); // Clear queued/stuck audio on mobile browsers
-          const cleanText = (text || '').replace(/\s*\(받침\)/, '').trim();
-          if (!cleanText) return;
-
-          const utterance = new SpeechSynthesisUtterance(cleanText);
-          utterance.lang = 'ko-KR';
-          utterance.rate = this.rate || 0.8; // Slightly slower for crisp mobile clarity
-          utterance.pitch = 1.0;
-          utterance.volume = 1.0;
-
-          if (!this.voices || this.voices.length === 0) {
-            this.loadVoices();
-          }
-
-          if (this.selectedVoiceURI) {
-            const chosen = this.voices.find(v => (v.voiceURI || v.name) === this.selectedVoiceURI);
-            if (chosen) utterance.voice = chosen;
-          } else {
-            const koVoice = this.voices.find(v => v.lang.includes('ko') || v.lang.includes('KR') || v.lang.includes('KO'));
-            if (koVoice) utterance.voice = koVoice;
-          }
-
-          window.speechSynthesis.speak(utterance);
+          const encodedText = encodeURIComponent(cleanText);
+          const fallbackAudioUrl = `https://translate.google.com/translate_tts?ie=UTF-8&q=${encodedText}&tl=ko&client=tw-ob`;
+          const audio = new Audio(fallbackAudioUrl);
+          audio.play().catch(e => console.log('Fallback audio play blocked', e));
         } catch (e) {
-          console.error('Speech Synthesis Error:', e);
+          console.error('Audio fallback error:', e);
         }
       },
 
