@@ -915,7 +915,7 @@
     // 2. AUDIO SYNTHESIZER & SPEECH ENGINE
     const AUDIO = {
       sfxEnabled: true,
-      rate: 0.9,
+      rate: 0.8,
       audioCtx: null,
       unlocked: false,
       voices: [],
@@ -963,23 +963,24 @@
         if (banner) banner.classList.add('hidden');
       },
 
-      speak(text, lang = 'ko-KR') {
+      speakKorean(text) {
         if (!this.unlocked) {
           this.unlock();
         }
         if (!('speechSynthesis' in window)) {
-          UI.toast('Speech Synthesis not supported in browser', 'error');
+          if (typeof UI !== 'undefined' && UI.toast) UI.toast('Speech Synthesis not supported in browser', 'error');
           return;
         }
         try {
-          window.speechSynthesis.cancel();
-          const cleanText = text.replace(/\s*\(받침\)/, '').trim();
+          window.speechSynthesis.cancel(); // Clear queued/stuck audio on mobile browsers
+          const cleanText = (text || '').replace(/\s*\(받침\)/, '').trim();
           if (!cleanText) return;
 
           const utterance = new SpeechSynthesisUtterance(cleanText);
-          utterance.lang = lang;
-          utterance.rate = this.rate;
+          utterance.lang = 'ko-KR';
+          utterance.rate = this.rate || 0.8; // Slightly slower for crisp mobile clarity
           utterance.pitch = 1.0;
+          utterance.volume = 1.0;
 
           if (!this.voices || this.voices.length === 0) {
             this.loadVoices();
@@ -989,13 +990,35 @@
             const chosen = this.voices.find(v => (v.voiceURI || v.name) === this.selectedVoiceURI);
             if (chosen) utterance.voice = chosen;
           } else {
-            const koVoice = this.voices.find(v => v.lang.includes('ko') || v.lang.includes('KO'));
+            const koVoice = this.voices.find(v => v.lang.includes('ko') || v.lang.includes('KR') || v.lang.includes('KO'));
             if (koVoice) utterance.voice = koVoice;
           }
 
           window.speechSynthesis.speak(utterance);
         } catch (e) {
           console.error('Speech Synthesis Error:', e);
+        }
+      },
+
+      speak(text, lang = 'ko-KR') {
+        if (lang === 'ko-KR' || lang.includes('ko')) {
+          this.speakKorean(text);
+        } else {
+          if (!this.unlocked) this.unlock();
+          if (!('speechSynthesis' in window)) return;
+          try {
+            window.speechSynthesis.cancel();
+            const cleanText = (text || '').trim();
+            if (!cleanText) return;
+            const utterance = new SpeechSynthesisUtterance(cleanText);
+            utterance.lang = lang;
+            utterance.rate = this.rate || 0.8;
+            utterance.pitch = 1.0;
+            utterance.volume = 1.0;
+            window.speechSynthesis.speak(utterance);
+          } catch (e) {
+            console.error('Speech Synthesis Error:', e);
+          }
         }
       },
 
@@ -1062,6 +1085,11 @@
         this.sfxEnabled = enabled;
       }
     };
+
+    // Alias AudioEngine for global availability
+    const AudioEngine = AUDIO;
+    window.AUDIO = AUDIO;
+    window.AudioEngine = AUDIO;
 
     // 3. PERSISTENCE ENGINE (LocalStorage)
     const STORE = {
@@ -4669,13 +4697,24 @@
       }
     };
 
+    // Explicit Mobile Audio Unlocker Listener setup
+    const unlockMobileAudio = () => {
+      if (typeof AUDIO !== 'undefined') AUDIO.unlock();
+      if (typeof AudioEngine !== 'undefined') AudioEngine.unlock();
+      document.removeEventListener('touchstart', unlockMobileAudio);
+      document.removeEventListener('click', unlockMobileAudio);
+      window.removeEventListener('touchstart', unlockMobileAudio);
+      window.removeEventListener('click', unlockMobileAudio);
+    };
+
+    document.addEventListener('touchstart', unlockMobileAudio, { passive: true });
+    document.addEventListener('click', unlockMobileAudio, { passive: true });
+    window.addEventListener('touchstart', unlockMobileAudio, { passive: true });
+    window.addEventListener('click', unlockMobileAudio, { passive: true });
+
     // Boot system on DOM Ready & Register PWA / Offline Service Worker
     window.addEventListener('DOMContentLoaded', () => {
       UI.init();
-
-      // Audio unlock listeners on first user touch or click
-      document.addEventListener('touchstart', () => AUDIO.unlock(), { passive: true, once: true });
-      document.addEventListener('click', () => AUDIO.unlock(), { passive: true, once: true });
 
       window.addEventListener('resize', () => {
         if (GAME_ENGINE.canvasMgr) GAME_ENGINE.canvasMgr.resize();
